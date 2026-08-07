@@ -1,0 +1,32 @@
+{
+  "name": "mcp-rewind",
+  "version": "1.0.0",
+  "description": "Astreamable HTTP and SSE proxy for MCP servers that can record and replay traffic",
+  "main": "index.js",
+  "scripts": {
+    "lint": "standard --fix"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ArnaudBuchholz/mcp-rewind.git"
+  },
+  "keywords": [
+    "ai",
+    "mcp",
+    "recorder",
+    "replay"
+  ],
+  "author": "Arnaud Buchholz <arnaud.buchholz@free.fr>",
+  "license": "MIT",
+  "type": "module",
+  "bugs": {
+    "url": "https://github.com/ArnaudBuchholz/mcp-rewind/issues"
+  },
+  "homepage": "https://github.com/ArnaudBuchholz/mcp-rewind#readme",
+  "dependencies": {
+    "reserve": "^2.3.6"
+  },
+  "devDependencies": {
+    "standard": "^17.1.2"
+  }
+}
