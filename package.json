@@ -24,7 +24,7 @@
   },
   "homepage": "https://github.com/ArnaudBuchholz/mcp-rewind#readme",
   "dependencies": {
-    "reserve": "^2.3.6"
+    "reserve": "^2.3.8"
   },
   "devDependencies": {
     "standard": "^17.1.2"
