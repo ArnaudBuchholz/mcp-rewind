@@ -4,6 +4,10 @@ A streamable HTTP/SSE proxy for MCP servers that records traffic and replays it 
 
 Supports both old-style MCP (no `mcp-session-id`) and new-style MCP (with `mcp-session-id`).
 
+## Purpose
+
+mcp-rewind is designed for **testing MCP-powered applications in isolation** — without requiring the real MCP server to be running. Record a session once against the live server, commit the cache, and your tests replay it deterministically with no network dependency.
+
 ## How it works
 
 ```
@@ -13,6 +17,10 @@ MCP client  →  mcp-rewind (proxy)  →  MCP server
 In **record** mode, mcp-rewind sits between your MCP client and server, forwarding all traffic and saving the results to a cache directory.
 
 In **replay** mode, mcp-rewind answers client requests directly from the cache — no MCP server needed.
+
+### Replay ordering
+
+Tools can be called in **any order** during replay, not just the order they were originally recorded. The replay cache is keyed by method and — for `tools/call` — by tool name plus a hash of the arguments. As long as the parameters are exactly the same as when they were recorded, the cached result will be returned regardless of call sequence.
 
 ## Usage
 
