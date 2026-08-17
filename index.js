@@ -2,52 +2,9 @@ import { createWriteStream } from 'node:fs'
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
 import { createHash, randomUUID } from 'node:crypto'
 import { join } from 'node:path'
-import { parseArgs } from 'node:util'
 import { capture, log, serve, body, send } from 'reserve'
+import { port, url, cache, replay } from './args.js'
 
-const { values } = parseArgs({
-  options: {
-    port: {
-      type: 'string',
-      short: 'p',
-      default: '0'
-    },
-    url: {
-      type: 'string',
-      short: 'u'
-    },
-    cache: {
-      type: 'string',
-      short: 'c'
-    },
-    replay: {
-      type: 'boolean',
-      short: 'r',
-      default: false
-    }
-  }
-})
-
-const port = Number(values.port)
-if (!Number.isInteger(port) || port < 0) {
-  console.error('--port / -p must be a non-negative integer')
-  process.exit(1)
-}
-
-if (!values.url) {
-  console.error('--url / -u is required')
-  process.exit(1)
-}
-
-let url
-try {
-  url = new URL(values.url)
-} catch {
-  console.error('--url / -u must be a valid URL')
-  process.exit(1)
-}
-
-const { cache, replay } = values
 const cacheBasePath = join('.', cache ?? 'cache')
 await mkdir(cacheBasePath, { recursive: true })
 
@@ -94,7 +51,8 @@ function sendSse (res, id, result, withSessionId) {
 const server = serve({
   port,
   mappings: [{
-    method: 'GET',
+    method: 'POST',
+    'invert-match': true, // Only POST supported
     status: 405
   }, {
     match: '^/(.*)',
@@ -110,7 +68,6 @@ const server = serve({
       const requestBody = JSON.parse(requestBodyAsText)
       const method = requestBody?.method
       const clientSentSessionId = !!req.headers['mcp-session-id']
-      console.log(method)
       if (method?.startsWith('notifications/')) {
         return 202
       }
@@ -140,7 +97,7 @@ const server = serve({
         return LIST_ADMIN_METHODS.has(method) ? 202 : 500
       }
       console.error(requestBody)
-      console.error('No response to send')
+      console.error('⚠️ No recorded response to send')
       return 500
     }
   }, {
@@ -148,15 +105,15 @@ const server = serve({
     custom: async (req, res) => {
       const key = ++lastRequestId
       let name = ''
-      let isListMethod = false
+      let isAdminMethod = false
       let isToolCall = false
       const requestBodyAsText = await body(req).text()
       if (requestBodyAsText) {
         const requestBody = JSON.parse(requestBodyAsText)
         const method = requestBody?.method
-        isListMethod = LIST_ADMIN_METHODS.has(method)
+        isAdminMethod = LIST_ADMIN_METHODS.has(method)
         isToolCall = method === 'tools/call'
-        if (isListMethod) {
+        if (isAdminMethod) {
           name = ' ' + method.replaceAll('/', '_')
         } else if (isToolCall) {
           name = ` tools_call_${requestBody.params.name}_${hashParams(requestBody?.params?.arguments)}`
@@ -165,17 +122,15 @@ const server = serve({
           verb: req.verb,
           url: req.url,
           headers: req.headers,
-          body: requestBody,
+          body: requestBody
         }, 0, 2))
       }
-      // Strip session id so the upstream doesn't reject a stale/foreign id
-      delete req.headers['mcp-session-id']
       const file = createWriteStream(join(cacheBasePath, `${key}${name}.res.json`))
       capture(res, file)
         .then(async ({ status, headers }) => {
           const resHeadPath = join(cacheBasePath, `${key}${name}.res-head.json`)
           await writeFile(resHeadPath, JSON.stringify({ status, headers }, 0, 2))
-          if (!isListMethod && !isToolCall) return
+          if (!isAdminMethod && !isToolCall) return
           const resPath = join(cacheBasePath, `${key}${name}.res.json`)
           const raw = await readFile(resPath, 'utf8')
           try {
@@ -188,15 +143,19 @@ const server = serve({
           }
         })
         .catch(reason => {
-          console.error('Unable to cache', reason)
+          console.error('❌ Unable to cache', reason)
         })
     }
-  }, {
+  }, url ? {
     match: '^/(.*)',
     url: new URL('$1', url).href
-  }]
+  } : { status: 4040 }]
 })
 log(server)
 server.on('ready', ({ url: localUrl }) => {
-  console.log(`${localUrl} => ${url}`)
+  if (replay) {
+    console.log(`▶️  ${localUrl} (replay recorded)`)
+  } else {
+    console.log(`⏺️  ${localUrl} => ${url}`)
+  }
 })
