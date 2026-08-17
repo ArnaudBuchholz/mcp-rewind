@@ -1,5 +1,5 @@
 import { createWriteStream } from 'node:fs'
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
 import { createHash, randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { parseArgs } from 'node:util'
@@ -76,7 +76,20 @@ const replaySessionId = randomUUID()
 
 let lastRequestId = 0
 
-// Need to handle the mcp-session-id
+async function findCacheFile (key) {
+  const suffix = ` ${key}.json`
+  const entries = await readdir(cacheBasePath)
+  const match = entries.find(e => e.endsWith(suffix))
+  return match ? join(cacheBasePath, match) : null
+}
+
+function sendSse (res, id, result, withSessionId) {
+  if (withSessionId) {
+    res.setHeader('mcp-session-id', replaySessionId)
+  }
+  res.setHeader('Content-Type', 'text/event-stream')
+  res.end(`event: message\ndata: ${JSON.stringify({ jsonrpc: '2.0', id, result })}\n\n`)
+}
 
 const server = serve({
   port,
@@ -96,38 +109,35 @@ const server = serve({
       }
       const requestBody = JSON.parse(requestBodyAsText)
       const method = requestBody?.method
+      const clientSentSessionId = !!req.headers['mcp-session-id']
       console.log(method)
-      let key
       if (method?.startsWith('notifications/')) {
         return 202
-      } else if (LIST_ADMIN_METHODS.has(method)) {
+      }
+      let key
+      if (LIST_ADMIN_METHODS.has(method)) {
         key = method.replaceAll('/', '_')
       } else if (method === 'tools/call') {
         key = `tools_call_${requestBody.params.name}_${hashParams(requestBody?.params?.arguments)}`
       }
       if (key) {
         try {
-          const cached = await readFile(join(cacheBasePath, `${key}.json`), 'utf8')
-          if (method === 'tools/call') {
-            res.setHeader('Content-Type', 'text/event-stream')
-            res.end(`event: message\ndata: ${JSON.stringify({ jsonrpc: '2.0', id: requestBody.id, result: JSON.parse(cached) })}\n\n`)
-          } else {
-            send(res, { jsonrpc: '2.0', id: requestBody.id, result: JSON.parse(cached) }, {
-              headers: { 'mcp-session-id': replaySessionId }
-            })
+          const cachePath = await findCacheFile(key)
+          if (cachePath) {
+            const cached = await readFile(cachePath, 'utf8')
+            sendSse(res, requestBody.id, JSON.parse(cached), clientSentSessionId)
+            return
           }
-          return
         } catch (error) {
-          if (error.code !== 'ENOENT') { // no cache file found
-            console.error(error)
-          }
+          console.error(error)
+        }
+        // No cache file — return empty result for known empty methods, 202 for others
+        const emptyResult = EMPTY_RESULTS[method]
+        if (emptyResult !== undefined) {
+          sendSse(res, requestBody.id, emptyResult, clientSentSessionId)
+          return
         }
         return LIST_ADMIN_METHODS.has(method) ? 202 : 500
-      }
-      const emptyResult = EMPTY_RESULTS[method]
-      if (emptyResult !== undefined) {
-        send(res, { jsonrpc: '2.0', id: requestBody.id, result: emptyResult })
-        return
       }
       console.error(requestBody)
       console.error('No response to send')
@@ -136,7 +146,8 @@ const server = serve({
   }, {
     match: '^/(.*)',
     custom: async (req, res) => {
-      let key
+      const key = ++lastRequestId
+      let name = ''
       let isListMethod = false
       let isToolCall = false
       const requestBodyAsText = await body(req).text()
@@ -146,38 +157,34 @@ const server = serve({
         isListMethod = LIST_ADMIN_METHODS.has(method)
         isToolCall = method === 'tools/call'
         if (isListMethod) {
-          key = method.replaceAll('/', '_')
+          name = ' ' + method.replaceAll('/', '_')
         } else if (isToolCall) {
-          key = `tools_call_${requestBody.params.name}_${hashParams(requestBody?.params?.arguments)}`
-        } else {
-          key = ++lastRequestId
+          name = ` tools_call_${requestBody.params.name}_${hashParams(requestBody?.params?.arguments)}`
         }
-        if (!isListMethod) {
-          await writeFile(join(cacheBasePath, `${key}.req.json`), JSON.stringify({
-            verb: req.verb,
-            url: req.url,
-            headers: req.headers,
-            body: requestBody,
-          }, 0, 2))
-        }
-      } else {
-        key = ++lastRequestId
+        await writeFile(join(cacheBasePath, `${key}${name}.req.json`), JSON.stringify({
+          verb: req.verb,
+          url: req.url,
+          headers: req.headers,
+          body: requestBody,
+        }, 0, 2))
       }
-      const file = createWriteStream(join(cacheBasePath, `${key}.res.json`)) // auto closed
+      // Strip session id so the upstream doesn't reject a stale/foreign id
+      delete req.headers['mcp-session-id']
+      const file = createWriteStream(join(cacheBasePath, `${key}${name}.res.json`))
       capture(res, file)
-        .then(async () => {
+        .then(async ({ status, headers }) => {
+          const resHeadPath = join(cacheBasePath, `${key}${name}.res-head.json`)
+          await writeFile(resHeadPath, JSON.stringify({ status, headers }, 0, 2))
           if (!isListMethod && !isToolCall) return
-          const resPath = join(cacheBasePath, `${key}.res.json`)
+          const resPath = join(cacheBasePath, `${key}${name}.res.json`)
           const raw = await readFile(resPath, 'utf8')
           try {
             const result = extractLastResult(raw)
             if (result != null) {
-              await writeFile(join(cacheBasePath, `${key}.json`), JSON.stringify(result, 0, 2))
+              await writeFile(join(cacheBasePath, `${key}${name}.json`), JSON.stringify(result, 0, 2))
             }
           } catch {
             // ignore
-          } finally {
-            await rm(resPath)
           }
         })
         .catch(reason => {
