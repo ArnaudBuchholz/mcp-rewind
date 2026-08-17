@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import { createWriteStream } from 'node:fs'
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
 import { createHash, randomUUID } from 'node:crypto'

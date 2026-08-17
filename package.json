@@ -1,8 +1,17 @@
 {
   "name": "mcp-rewind",
-  "version": "1.0.0",
-  "description": "Astreamable HTTP and SSE proxy for MCP servers that can record and replay traffic",
+  "version": "0.0.0",
+  "description": "A streamable HTTP and SSE proxy for MCP servers that can record and replay traffic",
   "main": "index.js",
+  "bin": {
+    "mcp-rewind": "index.js"
+  },
+  "files": [
+    "*.js"
+  ],
+  "engines": {
+    "node": ">=22.14.0"
+  },
   "scripts": {
     "lint": "standard --fix"
   },
@@ -27,6 +36,12 @@
     "reserve": "^2.3.8"
   },
   "devDependencies": {
+    "semantic-release": "^25.0.9",
     "standard": "^17.1.2"
+  },
+  "release": {
+    "branches": [
+      "main"
+    ]
   }
 }
