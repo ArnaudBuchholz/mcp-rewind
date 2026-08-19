@@ -67,6 +67,10 @@ function sendSse (res, id, result, withSessionId) {
 const server = serve({
   port,
   mappings: [{
+    method: 'GET',
+    match: '/healthcheck',
+    status: 200
+  }, {
     method: 'POST',
     'invert-match': true, // Only POST supported
     status: 405
