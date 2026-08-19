@@ -4,16 +4,18 @@ import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { createHash, randomUUID } from 'node:crypto'
 import { isAbsolute, join } from 'node:path'
 import { capture, log, serve, body, send } from 'reserve'
-import { port, url, cache, replay, clean, verbose } from './args.js'
+import { port, url, cache, replay, clean, verbose, proxyOnly } from './args.js'
 import { createRequire } from 'node:module'
 const { version } = createRequire(import.meta.url)('./package.json')
 console.log(`mcp-rewind@${version}`)
 
 const cacheBasePath = cache && isAbsolute(cache) ? cache : join('.', cache ?? 'cache')
-await mkdir(cacheBasePath, { recursive: true })
-if (clean) {
-  await rm(cacheBasePath, { recursive: true, force: true })
-  await mkdir(cacheBasePath)
+if (!proxyOnly) {
+  await mkdir(cacheBasePath, { recursive: true })
+  if (clean) {
+    await rm(cacheBasePath, { recursive: true, force: true })
+    await mkdir(cacheBasePath)
+  }
 }
 
 const LIST_ADMIN_METHODS = new Set(['initialize', 'tools/list', 'resources/list', 'resources/templates/list'])
@@ -71,7 +73,7 @@ const server = serve({
   }, {
     match: '^/(.*)',
     custom: async (req, res) => {
-      if (!replay) {
+      if (!replay || proxyOnly) {
         return
       }
       const requestBodyAsText = await body(req).text()
@@ -138,6 +140,9 @@ const server = serve({
   }, {
     match: '^/(.*)',
     custom: async (req, res) => {
+      if (proxyOnly) {
+        return
+      }
       let name = ''
       let isAdminMethod = false
       let isToolCall = false
@@ -206,6 +211,8 @@ log(server)
 server.on('ready', ({ url: localUrl }) => {
   if (replay) {
     console.log(`▶️  ${localUrl} (replay recorded)`)
+  } else if (proxyOnly) {
+    console.log(`⏩  ${localUrl} => ${url} (proxy-only)`)
   } else {
     console.log(`⏺️  ${localUrl} => ${url}`)
   }

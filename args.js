@@ -29,6 +29,10 @@ const { values } = parseArgs({
       type: 'boolean',
       short: 'v',
       default: false
+    },
+    'proxy-only': {
+      type: 'boolean',
+      default: false
     }
   }
 })
@@ -39,10 +43,15 @@ if (!Number.isInteger(port) || port < 0) {
   process.exit(1)
 }
 
-export const { cache, replay, clean, verbose } = values
+export const { cache, replay, clean, verbose, 'proxy-only': proxyOnly } = values
 
 if (clean && replay) {
   console.error('❌ --clean cannot be used with --replay')
+  process.exit(1)
+}
+
+if (proxyOnly && replay) {
+  console.error('❌ --proxy-only cannot be used with --replay')
   process.exit(1)
 }
 
