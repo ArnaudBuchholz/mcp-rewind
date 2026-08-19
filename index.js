@@ -3,7 +3,7 @@ import { createWriteStream } from 'node:fs'
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { createHash, randomUUID } from 'node:crypto'
 import { isAbsolute, join } from 'node:path'
-import { capture, log, serve, body, send } from 'reserve'
+import { capture, log, serve, body } from 'reserve'
 import { port, url, cache, replay, clean, verbose, proxyOnly } from './args.js'
 import { createRequire } from 'node:module'
 const { version } = createRequire(import.meta.url)('./package.json')
