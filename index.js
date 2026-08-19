@@ -2,14 +2,14 @@
 import { createWriteStream } from 'node:fs'
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { createHash, randomUUID } from 'node:crypto'
-import { join } from 'node:path'
+import { isAbsolute, join } from 'node:path'
 import { capture, log, serve, body, send } from 'reserve'
-import { port, url, cache, replay, clean } from './args.js'
+import { port, url, cache, replay, clean, verbose } from './args.js'
 import { createRequire } from 'node:module'
 const { version } = createRequire(import.meta.url)('./package.json')
 console.log(`mcp-rewind@${version}`)
 
-const cacheBasePath = join('.', cache ?? 'cache')
+const cacheBasePath = cache && isAbsolute(cache) ? cache : join('.', cache ?? 'cache')
 await mkdir(cacheBasePath, { recursive: true })
 if (clean) {
   await rm(cacheBasePath, { recursive: true, force: true })
@@ -97,12 +97,14 @@ const server = serve({
           if (cachePath) {
             const cached = JSON.parse(await readFile(cachePath, 'utf8'))
             const result = method === 'tools/call' ? cached.result : cached
+            if (verbose) console.log(`✅ ${key}`)
             sendSse(res, requestBody.id, result, clientSentSessionId)
             return
           }
           if (method === 'tools/call') {
             const best = await findBestMatch(requestBody.params.name, requestBody.params.arguments ?? {})
             if (best) {
+              if (verbose) console.log(`✅ ${key} (fuzzy match)`)
               sendSse(res, requestBody.id, best.result, clientSentSessionId)
               return
             }
@@ -110,13 +112,16 @@ const server = serve({
         } catch (error) {
           console.error(error)
         }
+        if (verbose) console.log(`❌ ${key} (no cache)`)
         // No cache file — return empty result for known empty methods, 202 for others
         const emptyResult = EMPTY_RESULTS[method]
         if (emptyResult !== undefined) {
           sendSse(res, requestBody.id, emptyResult, clientSentSessionId)
           return
         }
-        return LIST_ADMIN_METHODS.has(method) ? 202 : 500
+        if (LIST_ADMIN_METHODS.has(method)) {
+          return 202
+        }
       }
       console.error(requestBody)
       console.error('⚠️ No recorded response to send')
@@ -134,6 +139,7 @@ const server = serve({
         requestBody = JSON.parse(requestBodyAsText)
         const method = requestBody?.method
         if (method?.startsWith('notifications/')) {
+          if (verbose) console.log(`⏭️  ${method}`)
           return
         }
         isAdminMethod = LIST_ADMIN_METHODS.has(method)
@@ -144,6 +150,7 @@ const server = serve({
           name = ` tools_call_${requestBody.params.name}_${hashParams(requestBody?.params?.arguments)}`
         }
         if ((isAdminMethod || isToolCall) && await findCacheFile(name.trim())) {
+          if (verbose) console.log(`⏭️  ${name.trim()} (already cached)`)
           return
         }
       }
@@ -171,6 +178,7 @@ const server = serve({
                 ? { arguments: requestBody?.params?.arguments ?? {}, result }
                 : result
               await writeFile(join(cacheBasePath, `${key}${name}.json`), JSON.stringify(distilled, 0, 2))
+              if (verbose) console.log(`⏺️  ${name.trim()}`)
             }
           } catch {
             // ignore

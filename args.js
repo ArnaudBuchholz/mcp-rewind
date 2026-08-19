@@ -24,6 +24,11 @@ const { values } = parseArgs({
     clean: {
       type: 'boolean',
       default: false
+    },
+    verbose: {
+      type: 'boolean',
+      short: 'v',
+      default: false
     }
   }
 })
@@ -34,7 +39,7 @@ if (!Number.isInteger(port) || port < 0) {
   process.exit(1)
 }
 
-export const { cache, replay, clean } = values
+export const { cache, replay, clean, verbose } = values
 
 if (clean && replay) {
   console.error('❌ --clean cannot be used with --replay')
