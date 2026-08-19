@@ -77,7 +77,7 @@ const server = serve({
       const requestBodyAsText = await body(req).text()
       if (!requestBodyAsText) {
         console.error('No body')
-        return 500
+        return 400
       }
       const requestBody = JSON.parse(requestBodyAsText)
       const method = requestBody?.method
@@ -123,9 +123,17 @@ const server = serve({
           return 202
         }
       }
+      if (method === 'tools/call') {
+        console.error(`⚠️ No recorded response for ${requestBody.params?.name}`)
+        sendSse(res, requestBody.id, {
+          content: [{ type: 'text', text: `Error: no recorded response for ${requestBody.params?.name}` }],
+          isError: true
+        }, clientSentSessionId)
+        return
+      }
       console.error(requestBody)
       console.error('⚠️ No recorded response to send')
-      return 500
+      return 404
     }
   }, {
     match: '^/(.*)',
