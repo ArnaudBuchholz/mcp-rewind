@@ -35,7 +35,7 @@ export const { cache, replay } = values
 export let url = ''
 if (!replay) {
   try {
-    url = new URL(values.url)
+    url = new URL(values.url).href
   } catch {
     console.error('❌ --url / -u must be a valid URL')
     process.exit(1)

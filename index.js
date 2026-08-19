@@ -166,9 +166,8 @@ const server = serve({
         })
     }
   }, url ? {
-    match: '^/(.*)',
-    url: new URL('$1', url).href
-  } : { status: 4040 }]
+    url
+  } : { status: 404 }]
 })
 log(server)
 server.on('ready', ({ url: localUrl }) => {
