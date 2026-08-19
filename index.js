@@ -41,6 +41,12 @@ async function findCacheFile (key) {
   return match ? join(cacheBasePath, match) : null
 }
 
+// Fuzzy fallback — placeholder until algorithm is wired in
+async function findBestMatch (toolName, incomingArguments) {
+  // TODO: load all tools_call_<toolName>_*.json, apply fuzzy scoring
+  return null
+}
+
 function sendSse (res, id, result, withSessionId) {
   if (withSessionId) {
     res.setHeader('mcp-session-id', replaySessionId)
@@ -82,9 +88,17 @@ const server = serve({
         try {
           const cachePath = await findCacheFile(key)
           if (cachePath) {
-            const cached = await readFile(cachePath, 'utf8')
-            sendSse(res, requestBody.id, JSON.parse(cached), clientSentSessionId)
+            const cached = JSON.parse(await readFile(cachePath, 'utf8'))
+            const result = method === 'tools/call' ? cached.result : cached
+            sendSse(res, requestBody.id, result, clientSentSessionId)
             return
+          }
+          if (method === 'tools/call') {
+            const best = await findBestMatch(requestBody.params.name, requestBody.params.arguments ?? {})
+            if (best) {
+              sendSse(res, requestBody.id, best.result, clientSentSessionId)
+              return
+            }
           }
         } catch (error) {
           console.error(error)
@@ -108,9 +122,10 @@ const server = serve({
       let name = ''
       let isAdminMethod = false
       let isToolCall = false
+      let requestBody
       const requestBodyAsText = await body(req).text()
       if (requestBodyAsText) {
-        const requestBody = JSON.parse(requestBodyAsText)
+        requestBody = JSON.parse(requestBodyAsText)
         const method = requestBody?.method
         isAdminMethod = LIST_ADMIN_METHODS.has(method)
         isToolCall = method === 'tools/call'
@@ -137,7 +152,10 @@ const server = serve({
           try {
             const result = extractLastResult(raw)
             if (result != null) {
-              await writeFile(join(cacheBasePath, `${key}${name}.json`), JSON.stringify(result, 0, 2))
+              const distilled = isToolCall
+                ? { arguments: requestBody?.params?.arguments ?? {}, result }
+                : result
+              await writeFile(join(cacheBasePath, `${key}${name}.json`), JSON.stringify(distilled, 0, 2))
             }
           } catch {
             // ignore
