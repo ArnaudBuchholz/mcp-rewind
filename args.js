@@ -20,6 +20,10 @@ const { values } = parseArgs({
       type: 'boolean',
       short: 'r',
       default: false
+    },
+    clean: {
+      type: 'boolean',
+      default: false
     }
   }
 })
@@ -30,7 +34,12 @@ if (!Number.isInteger(port) || port < 0) {
   process.exit(1)
 }
 
-export const { cache, replay } = values
+export const { cache, replay, clean } = values
+
+if (clean && replay) {
+  console.error('❌ --clean cannot be used with --replay')
+  process.exit(1)
+}
 
 export let url = ''
 if (!replay) {

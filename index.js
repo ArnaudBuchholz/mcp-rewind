@@ -1,15 +1,22 @@
 #!/usr/bin/env node
 import { createWriteStream } from 'node:fs'
-import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { createHash, randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { capture, log, serve, body, send } from 'reserve'
-import { port, url, cache, replay } from './args.js'
+import { port, url, cache, replay, clean } from './args.js'
+import { createRequire } from 'node:module'
+const { version } = createRequire(import.meta.url)('./package.json')
+console.log(`mcp-rewind@${version}`)
 
 const cacheBasePath = join('.', cache ?? 'cache')
 await mkdir(cacheBasePath, { recursive: true })
+if (clean) {
+  await rm(cacheBasePath, { recursive: true, force: true })
+  await mkdir(cacheBasePath)
+}
 
-const LIST_ADMIN_METHODS = new Set(['initialize', 'notifications/initialized', 'tools/list', 'resources/list', 'resources/templates/list'])
+const LIST_ADMIN_METHODS = new Set(['initialize', 'tools/list', 'resources/list', 'resources/templates/list'])
 
 function hashParams (params) {
   return createHash('sha256').update(JSON.stringify(params ?? {})).digest('hex').slice(0, 16)
@@ -118,7 +125,6 @@ const server = serve({
   }, {
     match: '^/(.*)',
     custom: async (req, res) => {
-      const key = ++lastRequestId
       let name = ''
       let isAdminMethod = false
       let isToolCall = false
@@ -127,6 +133,9 @@ const server = serve({
       if (requestBodyAsText) {
         requestBody = JSON.parse(requestBodyAsText)
         const method = requestBody?.method
+        if (method?.startsWith('notifications/')) {
+          return
+        }
         isAdminMethod = LIST_ADMIN_METHODS.has(method)
         isToolCall = method === 'tools/call'
         if (isAdminMethod) {
@@ -134,6 +143,12 @@ const server = serve({
         } else if (isToolCall) {
           name = ` tools_call_${requestBody.params.name}_${hashParams(requestBody?.params?.arguments)}`
         }
+        if ((isAdminMethod || isToolCall) && await findCacheFile(name.trim())) {
+          return
+        }
+      }
+      const key = ++lastRequestId
+      if (requestBody) {
         await writeFile(join(cacheBasePath, `${key}${name}.req.json`), JSON.stringify({
           verb: req.verb,
           url: req.url,
@@ -165,9 +180,11 @@ const server = serve({
           console.error('❌ Unable to cache', reason)
         })
     }
-  }, url ? {
-    url
-  } : { status: 404 }]
+  }, url
+    ? {
+        url
+      }
+    : { status: 404 }]
 })
 log(server)
 server.on('ready', ({ url: localUrl }) => {
