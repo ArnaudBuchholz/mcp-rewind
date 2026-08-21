@@ -8,15 +8,43 @@ Supports both old-style MCP (no `mcp-session-id`) and new-style MCP (with `mcp-s
 
 mcp-rewind is designed for **testing MCP-powered applications in isolation** — without requiring the real MCP server to be running. Record a session once against the live server, commit the cache, and your tests replay it deterministically with no network dependency.
 
-## How it works
+## Modes
+
+### Record
+
+```
+MCP client  →  mcp-rewind (proxy)  →  MCP server
+                     ↓
+                  cache/
+```
+
+mcp-rewind sits between your MCP client and server, forwarding all traffic and saving results to the cache directory. Already-cached keys are skipped so re-running a partially recorded session is safe.
+
+### Replay
+
+```
+MCP client  →  mcp-rewind  →  cache/
+```
+
+mcp-rewind answers every request directly from the cache — no MCP server needed. Requests with no cached entry return an error or an empty result depending on the method.
+
+### Hybrid (replay with record fallback)
+
+```
+MCP client  →  mcp-rewind  →  cache/   (hit)
+                     ↓
+               MCP server + cache/     (miss → record for next time)
+```
+
+Pass both `--replay` and `--url` together. Cache hits are served immediately from disk; misses are forwarded to the live server and recorded, so the cache grows incrementally over time without re-recording the whole session.
+
+### Proxy-only
 
 ```
 MCP client  →  mcp-rewind (proxy)  →  MCP server
 ```
 
-In **record** mode, mcp-rewind sits between your MCP client and server, forwarding all traffic and saving the results to a cache directory.
-
-In **replay** mode, mcp-rewind answers client requests directly from the cache — no MCP server needed.
+Forwards all traffic without reading or writing the cache. Useful for inspecting traffic in `--verbose` mode before committing to a recording.
 
 ### Replay ordering
 
@@ -35,19 +63,34 @@ Point your MCP client at the printed local URL instead of the real server. Traff
 ### Replay
 
 ```bash
-node index.js --url http://placeholder --cache ./cache --replay
+node index.js --replay --cache ./cache
 ```
 
-The `--url` value is ignored in replay mode but is still required by the argument parser.
+### Hybrid (replay with record fallback)
+
+```bash
+node index.js --replay --url http://your-mcp-server --cache ./cache
+```
+
+Cache hits are served from disk. Misses are proxied live and recorded so subsequent runs serve them from cache.
+
+### Proxy-only
+
+```bash
+node index.js --proxy-only --url http://your-mcp-server
+```
 
 ### Options
 
 | Option | Short | Default | Description |
 |--------|-------|---------|-------------|
 | `--port` | `-p` | `0` (random) | Port to listen on |
-| `--url` | `-u` | *(required)* | Upstream MCP server URL |
+| `--url` | `-u` | — | Upstream MCP server URL (required in record/hybrid/proxy-only modes) |
 | `--cache` | `-c` | `./cache` | Directory to read/write cached results |
-| `--replay` | `-r` | `false` | Replay from cache instead of proxying |
+| `--replay` | `-r` | `false` | Replay from cache; add `--url` for hybrid mode |
+| `--proxy-only` | — | `false` | Proxy without reading or writing cache |
+| `--clean` | — | `false` | Wipe cache directory on startup (record mode only) |
+| `--verbose` | `-v` | `false` | Log each cache hit, miss, and skip |
 
 ## Cache directory layout
 

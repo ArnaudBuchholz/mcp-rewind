@@ -74,7 +74,7 @@ const server = serve({
     method: 'POST',
     'invert-match': true, // Only POST supported
     status: 405
-  }, {
+  }, { // REPLAY
     match: '^/(.*)',
     custom: async (req, res) => {
       if (!replay || proxyOnly) {
@@ -118,6 +118,10 @@ const server = serve({
         } catch (error) {
           console.error(error)
         }
+        if (url) {
+          if (verbose) console.log(`⚠️ ${key} (no cache)`)
+          return // fall through to record+proxy
+        }
         if (verbose) console.log(`❌ ${key} (no cache)`)
         // No cache file — return empty result for known empty methods, 202 for others
         const emptyResult = EMPTY_RESULTS[method]
@@ -129,6 +133,7 @@ const server = serve({
           return 202
         }
       }
+      if (url) return // fall through to record+proxy
       if (method === 'tools/call') {
         console.error(`⚠️ No recorded response for ${requestBody.params?.name}`)
         sendSse(res, requestBody.id, {
@@ -141,7 +146,7 @@ const server = serve({
       console.error('⚠️ No recorded response to send')
       return 404
     }
-  }, {
+  }, { // RECORD
     match: '^/(.*)',
     custom: async (req, res) => {
       if (proxyOnly) {
@@ -213,11 +218,13 @@ const server = serve({
 })
 log(server)
 server.on('ready', ({ url: localUrl }) => {
-  if (replay) {
-    console.log(`▶️  ${localUrl} (replay recorded)`)
+  if (replay && url) {
+    console.log(`▶️⏺️  ${localUrl} => ${url} (replay with record fallback)`)
+  } else if (replay) {
+    console.log(`▶️  ${localUrl} (replay only)`)
   } else if (proxyOnly) {
-    console.log(`⏩  ${localUrl} => ${url} (proxy-only)`)
+    console.log(`⏩  ${localUrl} => ${url} (proxy only)`)
   } else {
-    console.log(`⏺️  ${localUrl} => ${url}`)
+    console.log(`⏺️  ${localUrl} => ${url} (record only)`)
   }
 })

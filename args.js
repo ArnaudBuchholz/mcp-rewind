@@ -56,11 +56,14 @@ if (proxyOnly && replay) {
 }
 
 export let url = ''
-if (!replay) {
+if (values.url) {
   try {
     url = new URL(values.url).href
   } catch {
     console.error('❌ --url / -u must be a valid URL')
     process.exit(1)
   }
+} else if (!replay && !proxyOnly) {
+  console.error('❌ --url / -u is required in record mode')
+  process.exit(1)
 }
