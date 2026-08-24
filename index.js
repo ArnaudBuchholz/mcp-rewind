@@ -4,10 +4,9 @@ import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { createHash, randomUUID } from 'node:crypto'
 import { isAbsolute, join } from 'node:path'
 import { capture, log, serve, body } from 'reserve'
-import { port, url, cache, replay, clean, verbose, proxyOnly } from './args.js'
-import { createRequire } from 'node:module'
-const { version } = createRequire(import.meta.url)('./package.json')
-console.log(`mcp-rewind@${version}`)
+import { port, url, cache, replay, clean, verbose, proxyOnly, resultIgnore, resultHashPath } from './args.js'
+import { buildHashResult } from './hash.js'
+import { migrate } from './migrate.js'
 
 const cacheBasePath = cache && isAbsolute(cache) ? cache : join('.', cache ?? 'cache')
 if (!proxyOnly) {
@@ -22,6 +21,20 @@ const LIST_ADMIN_METHODS = new Set(['initialize', 'tools/list', 'resources/list'
 
 function hashParams (params) {
   return createHash('sha256').update(JSON.stringify(params ?? {})).digest('hex').slice(0, 16)
+}
+
+const hashResult = buildHashResult(resultIgnore, resultHashPath)
+
+function matchesSignature (signature, incomingArguments) {
+  for (const [key, pattern] of Object.entries(signature)) {
+    const value = incomingArguments[key]
+    if (pattern !== null && typeof pattern === 'object' && '$regexp' in pattern) {
+      if (!new RegExp(pattern.$regexp, pattern.$flags ?? '').test(String(value ?? ''))) return false
+    } else if (value !== pattern) {
+      return false
+    }
+  }
+  return true
 }
 
 function extractLastResult (sseText) {
@@ -42,6 +55,14 @@ const EMPTY_RESULTS = {
 const replaySessionId = randomUUID()
 
 let lastRequestId = 0
+if (!proxyOnly) {
+  const existing = await readdir(cacheBasePath)
+  for (const entry of existing) {
+    const num = parseInt(entry, 10)
+    if (!Number.isNaN(num) && num > lastRequestId) lastRequestId = num
+  }
+  await migrate(cacheBasePath, hashResult)
+}
 
 async function findCacheFile (key) {
   const suffix = ` ${key}.json`
@@ -50,9 +71,22 @@ async function findCacheFile (key) {
   return match ? join(cacheBasePath, match) : null
 }
 
-// Fuzzy fallback — placeholder until algorithm is wired in
 async function findBestMatch (toolName, incomingArguments) {
-  // TODO: load all tools_call_<toolName>_*.json, apply fuzzy scoring
+  const prefix = `tools_call_${toolName}_`
+  const entries = await readdir(cacheBasePath)
+  for (const entry of entries) {
+    if (!entry.endsWith('.json') || entry.includes('.res') || entry.includes('.req')) continue
+    const stem = entry.replace(/^\d+ /, '')
+    if (!stem.startsWith(prefix)) continue
+    try {
+      const cached = JSON.parse(await readFile(join(cacheBasePath, entry), 'utf8'))
+      for (const signature of cached.additionalArguments ?? []) {
+        if (matchesSignature(signature, incomingArguments)) return cached
+      }
+    } catch {
+      // ignore unreadable files
+    }
+  }
   return null
 }
 
@@ -92,7 +126,7 @@ const server = serve({
         return 202
       }
       let key
-      if (LIST_ADMIN_METHODS.has(method)) {
+      if (LIST_ADMIN_METHODS.has(method) && !url) {
         key = method.replaceAll('/', '_')
       } else if (method === 'tools/call') {
         key = `tools_call_${requestBody.params.name}_${hashParams(requestBody?.params?.arguments)}`
@@ -110,7 +144,7 @@ const server = serve({
           if (method === 'tools/call') {
             const best = await findBestMatch(requestBody.params.name, requestBody.params.arguments ?? {})
             if (best) {
-              if (verbose) console.log(`✅ ${key} (fuzzy match)`)
+              if (verbose) console.log(`✅🔍 ${key} (best match)`)
               sendSse(res, requestBody.id, best.result, clientSentSessionId)
               return
             }
@@ -196,11 +230,38 @@ const server = serve({
           try {
             const result = extractLastResult(raw)
             if (result != null) {
-              const distilled = isToolCall
-                ? { arguments: requestBody?.params?.arguments ?? {}, result }
-                : result
-              await writeFile(join(cacheBasePath, `${key}${name}.json`), JSON.stringify(distilled, 0, 2))
-              if (verbose) console.log(`⏺️  ${name.trim()}`)
+              if (isToolCall) {
+                const rHash = hashResult(result)
+                const toolName = requestBody?.params?.name
+                const prefix = `tools_call_${toolName}_`
+                const allEntries = await readdir(cacheBasePath)
+                let groupedInto = null
+                for (const entry of allEntries) {
+                  if (!entry.endsWith('.json') || entry.includes('.res') || entry.includes('.req')) continue
+                  if (!entry.replace(/^\d+ /, '').startsWith(prefix)) continue
+                  try {
+                    const entryData = JSON.parse(await readFile(join(cacheBasePath, entry), 'utf8'))
+                    if (entryData.resultHash === rHash) {
+                      entryData.additionalArguments = [...(entryData.additionalArguments ?? []), requestBody?.params?.arguments ?? {}]
+                      await writeFile(join(cacheBasePath, entry), JSON.stringify(entryData, 0, 2))
+                      groupedInto = entry
+                      break
+                    }
+                  } catch {
+                    // ignore unreadable files
+                  }
+                }
+                if (groupedInto) {
+                  if (verbose) console.log(`⏺️  ${name.trim()} (grouped into ${groupedInto})`)
+                } else {
+                  const distilled = { arguments: requestBody?.params?.arguments ?? {}, resultHash: rHash, result }
+                  await writeFile(join(cacheBasePath, `${key}${name}.json`), JSON.stringify(distilled, 0, 2))
+                  if (verbose) console.log(`⏺️  ${name.trim()}`)
+                }
+              } else {
+                await writeFile(join(cacheBasePath, `${key}${name}.json`), JSON.stringify(result, 0, 2))
+                if (verbose) console.log(`⏺️  ${name.trim()}`)
+              }
             }
           } catch {
             // ignore
@@ -219,7 +280,7 @@ const server = serve({
 log(server)
 server.on('ready', ({ url: localUrl }) => {
   if (replay && url) {
-    console.log(`▶️⏺️  ${localUrl} => ${url} (replay with record fallback)`)
+    console.log(`▶️ ⏺️  ${localUrl} => ${url} (replay with record fallback)`)
   } else if (replay) {
     console.log(`▶️  ${localUrl} (replay only)`)
   } else if (proxyOnly) {

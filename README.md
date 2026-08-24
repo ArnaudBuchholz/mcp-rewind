@@ -85,12 +85,32 @@ node index.js --proxy-only --url http://your-mcp-server
 | Option | Short | Default | Description |
 |--------|-------|---------|-------------|
 | `--port` | `-p` | `0` (random) | Port to listen on |
-| `--url` | `-u` | — | Upstream MCP server URL (required in record/hybrid/proxy-only modes) |
+| `--url` | `-u` | — | Upstream MCP server URL (required in record/hybrid/proxy-only modes); validated at startup with a live `initialize` probe |
 | `--cache` | `-c` | `./cache` | Directory to read/write cached results |
 | `--replay` | `-r` | `false` | Replay from cache; add `--url` for hybrid mode |
 | `--proxy-only` | — | `false` | Proxy without reading or writing cache |
 | `--clean` | — | `false` | Wipe cache directory on startup (record mode only) |
 | `--verbose` | `-v` | `false` | Log each cache hit, miss, and skip |
+| `--result-hash-path` | — | — | Dot-notation path into the result to use as hash input instead of the full result (e.g. `structuredContent.reportDefinition`) |
+| `--result-hash-ignore` | — | — | Dot-notation path to delete from the value before hashing (relative to `--result-hash-path` if set); repeatable |
+
+## Result hashing
+
+By default, the full tool-call result is hashed to detect duplicate responses and group them into a single cache entry. Two options let you normalise results before hashing when the server returns volatile fields that differ between otherwise identical responses.
+
+**`--result-hash-path <path>`** — narrow the hash input to a sub-object. Only that value is hashed; the rest of the result is ignored for matching purposes.
+
+**`--result-hash-ignore <path>`** — delete a field before hashing. Relative to `--result-hash-path` when both are set. Repeatable.
+
+Example: a server that embeds a unique `reportId` inside `structuredContent.reportDefinition` on every call, but whose actual content is identical:
+
+```bash
+node index.js --url http://your-mcp-server \
+  --result-hash-path structuredContent.reportDefinition \
+  --result-hash-ignore reportId
+```
+
+This hashes only `structuredContent.reportDefinition` with `reportId` stripped, so two calls that differ only in `reportId` are treated as duplicates and grouped into one cache entry.
 
 ## Cache directory layout
 
