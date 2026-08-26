@@ -170,13 +170,14 @@ const server = serve({
       if (url) return // fall through to record+proxy
       if (method === 'tools/call') {
         console.error(`⚠️ No recorded response for ${requestBody.params?.name}`)
+        if (verbose && requestBody.params) console.error('arguments:', JSON.stringify(requestBody.params.arguments, null, 2))
         sendSse(res, requestBody.id, {
           content: [{ type: 'text', text: `Error: no recorded response for ${requestBody.params?.name}` }],
           isError: true
         }, clientSentSessionId)
         return
       }
-      console.error(requestBody)
+      if (verbose) console.error('request body:', requestBody)
       console.error('⚠️ No recorded response to send')
       return 404
     }
